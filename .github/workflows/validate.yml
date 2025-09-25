@@ -1,0 +1,242 @@
+name: Product Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'package.json'
+      - 'package-lock.json'
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      persona:
+        description: 'Specific persona to test (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - power-user
+          - first-time-user
+          - mobile-user
+          - accessibility-user
+          - enterprise-user
+      environment:
+        description: 'Environment to test against'
+        required: true
+        type: choice
+        default: 'staging'
+        options:
+          - staging
+          - production
+          - local
+
+env:
+  NODE_VERSION: '20'
+  PLAYWRIGHT_BROWSERS_PATH: 0
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run-tests: ${{ steps.check.outputs.should-run }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Check if tests should run
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            # Check if relevant files changed
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '\.(js|ts|json|md|yml|yaml)$' | grep -v node_modules; then
+              echo "should-run=true" >> $GITHUB_OUTPUT
+            else
+              echo "should-run=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  install-dependencies:
+    needs: setup
+    if: needs.setup.outputs.should-run-tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm run install
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+  run-tests:
+    needs: [setup, install-dependencies]
+    if: needs.setup.outputs.should-run-tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        persona: ['power-user', 'first-time-user', 'mobile-user', 'accessibility-user', 'enterprise-user']
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        run: npm ci
+
+      - name: Setup environment
+        run: |
+          echo "PRODUCT_URL=${{ github.event.inputs.environment == 'production' && 'https://your-product.com' || github.event.inputs.environment == 'staging' && 'https://staging.your-product.com' || 'http://localhost:3000' }}" >> $GITHUB_ENV
+          echo "TEST_EMAIL=test@example.com" >> $GITHUB_ENV
+          echo "TEST_PASSWORD=testpassword123" >> $GITHUB_ENV
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+
+      - name: Run single persona test
+        if: github.event.inputs.persona == '' || github.event.inputs.persona == matrix.persona
+        run: |
+          npm run run -- --persona ${{ matrix.persona }}
+        continue-on-error: true
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results-${{ matrix.persona }}
+          path: |
+            reports/
+            playwright-report/
+            playwright-traces/
+          retention-days: 30
+
+  generate-report:
+    needs: [setup, run-tests]
+    if: always() && needs.setup.outputs.should-run-tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Download all test artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Generate comprehensive report
+        run: |
+          npm ci
+          # Create summary report from all artifacts
+          echo "# Product Validation Summary" > reports/validation-summary.md
+          echo "" >> reports/validation-summary.md
+          echo "**Generated:** $(date)" >> reports/validation-summary.md
+          echo "" >> reports/validation-summary.md
+          echo "## Test Results" >> reports/validation-summary.md
+          echo "" >> reports/validation-summary.md
+          find artifacts -name "ValidationReport.md" -exec echo "### {}" \; -exec cat {} \; >> reports/validation-summary.md
+
+      - name: Upload comprehensive report
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-validation-report
+          path: |
+            reports/validation-summary.md
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = fs.readFileSync('reports/validation-summary.md', 'utf8');
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## 🤖 Product Validation Results\n\n${report}`
+              });
+            } catch (error) {
+              console.error('Error creating PR comment:', error);
+            }
+
+  notify:
+    needs: [setup, run-tests, generate-report]
+    if: always() && needs.setup.outputs.should-run-tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify on success
+        if: needs.run-tests.result == 'success'
+        run: |
+          echo "✅ All validation tests passed successfully!"
+          echo "🎉 Product validation completed without issues"
+
+      - name: Notify on failure
+        if: needs.run-tests.result == 'failure'
+        run: |
+          echo "❌ Some validation tests failed!"
+          echo "🔍 Please check the validation reports for details"
+          exit 1
+
+      - name: Send Slack notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#product-alerts'
+          text: |
+            Product Validation ${{ job.status }}!
+            
+            Environment: ${{ github.event.inputs.environment || 'auto' }}
+            Persona: ${{ github.event.inputs.persona || 'all' }}
+            Commit: ${{ github.sha }}
+            
+            View results: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

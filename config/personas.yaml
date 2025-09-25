@@ -1,0 +1,23 @@
+# Default Persona Configuration for ValidateMe
+# Customize these personas for your specific product and user types
+
+personas:
+  - id: power-user
+    goal: "Complete complex workflow efficiently with advanced features"
+    task: "Set up advanced configuration, use all features, and export results"
+    
+  - id: first-time-user
+    goal: "Get started quickly with minimal friction and confusion"
+    task: "Sign up, complete onboarding, and perform basic operations"
+    
+  - id: mobile-user
+    goal: "Use product effectively on mobile device"
+    task: "Access key features via mobile interface and complete primary tasks"
+    
+  - id: accessibility-user
+    goal: "Use product with assistive technologies"
+    task: "Navigate using keyboard only and screen reader compatibility"
+    
+  - id: enterprise-user
+    goal: "Manage team workflows and enterprise features"
+    task: "Set up team accounts, configure permissions, and manage bulk operations"
