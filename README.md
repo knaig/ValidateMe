@@ -17,6 +17,16 @@ ValidateMe is a comprehensive testing framework that uses AI to evaluate product
 
 ### 1. Installation
 
+**Option A: Global Installation (Recommended)**
+```bash
+# Install globally
+npm install -g @knaig/validate-me
+
+# Or use the install script
+curl -fsSL https://raw.githubusercontent.com/knaig/ValidateMe/main/install.sh | bash
+```
+
+**Option B: Project-Specific**
 ```bash
 # Clone the repository
 git clone https://github.com/knaig/ValidateMe.git
@@ -69,6 +79,22 @@ personas:
 
 ### 4. Run Validation
 
+**With Global Installation:**
+```bash
+# Initialize in your project
+validate-me init
+
+# Single persona test
+validate-me test --persona=first-time-user
+
+# All personas
+validate-me test-all
+
+# Verify setup
+validate-me verify
+```
+
+**With Project Installation:**
 ```bash
 # Single persona test
 npm run run -- --persona=power-user

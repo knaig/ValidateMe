@@ -1,21 +1,17 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
-import path from 'path';
 import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(__filename);
 
-// Parse command line arguments
-const args = process.argv.slice(2);
+// Get the CLI script path
+const cliPath = join(__dirname, '..', 'src', 'cli.js');
 
-// Add the runner script
-const runnerPath = path.join(__dirname, '..', 'src', 'runner.mjs');
-const fullArgs = ['--experimental-modules', runnerPath, ...args];
-
-// Spawn the runner
-const child = spawn('node', fullArgs, {
+// Spawn the CLI
+const child = spawn('node', [cliPath, ...process.argv.slice(2)], {
   stdio: 'inherit',
   cwd: process.cwd()
 });
